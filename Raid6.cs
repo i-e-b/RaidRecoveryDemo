@@ -78,14 +78,25 @@ namespace RaidRecoverDemo
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
             
-
-            throw new NotImplementedException("This recovery not yet implemented");
+            throw new NotImplementedException("Unexpected state");
         }
 
-
-        private void RecoverDoubleLostData()
+        private void RecoverSingleLostDataFromParity()
         {
-            throw new NotImplementedException();
+            var recovered = new byte[_sliceSize];
+            var parity = ParityData;
+            var good1 = Data1 ?? Data2;
+            var good2 = Data3 ?? Data2;
+
+            if (parity == null || good1 == null || good2 == null) throw new Exception("Recover data from parity called with invalid state");
+            for (var i = 0; i < _sliceSize; i++)
+            {
+                recovered[i] = (byte)(good1[i] ^ good2[i] ^ parity[i]);
+            }
+            
+            Data1 ??= recovered;
+            Data2 ??= recovered;
+            Data3 ??= recovered;
         }
         
         private void RecoverSingleLostDataFromReedSolomon()
@@ -138,22 +149,94 @@ namespace RaidRecoverDemo
             Data3 ??= recovered;
         }
 
-        private void RecoverSingleLostDataFromParity()
+        private void RecoverDoubleLostData()
         {
-            var recovered = new byte[_sliceSize];
-            var parity = ParityData;
-            var good1 = Data1 ?? Data2;
-            var good2 = Data3 ?? Data2;
-
-            if (parity == null || good1 == null || good2 == null) throw new Exception("Recover data from parity called with invalid state");
-            for (var i = 0; i < _sliceSize; i++)
+            if (ReedSolomon == null || ParityData == null) throw new Exception("Recover double data called with invalid state");
+            if (Data1 != null)
             {
-                recovered[i] = (byte)(good1[i] ^ good2[i] ^ parity[i]);
+                RecoverFromData1();
             }
+            else if (Data2 != null)
+            {
+                RecoverFromData2();
+            }
+            else if (Data3 != null)
+            {
+                RecoverFromData3();
+            }
+            else throw new Exception("Invalid state");
+        }
+
+        private void RecoverFromData1()
+        {
+            if (Data1 == null || ReedSolomon == null || ParityData == null) throw new Exception("Recover double data (1) called with invalid state");
             
-            Data1 ??= recovered;
-            Data2 ??= recovered;
-            Data3 ??= recovered;
+            Data2 = new byte[_sliceSize];
+            Data3 = new byte[_sliceSize];
+            byte inv = 1;
+            var g = inv.Div(GaloisMath.Add(GaloisMath.Factor(2), GaloisMath.Factor(3)));
+            var f3 = GaloisMath.Factor(3);
+            
+            for (int i = 0; i < _sliceSize; i++)
+            {
+                var partParity = Data1[i];
+                var partReedSolomon = GaloisMath.Factor(1).Mul(Data1[i]);
+                
+                var xorPd = GaloisMath.Add(partParity, ParityData[i]);
+                var mid = GaloisMath.Add(f3.Mul(xorPd), partReedSolomon, ReedSolomon[i]);
+                
+                var r1 = mid.Mul(g);
+                Data2[i] = r1;
+                Data3[i] = GaloisMath.Add(r1, xorPd);
+            }
+        }
+
+        private void RecoverFromData2()
+        {
+            if (Data2 == null || ReedSolomon == null || ParityData == null) throw new Exception("Recover double data (2) called with invalid state");
+            
+            Data1 = new byte[_sliceSize];
+            Data3 = new byte[_sliceSize];
+            byte inv = 1;
+            var g = inv.Div(GaloisMath.Add(GaloisMath.Factor(1), GaloisMath.Factor(3)));
+            var f3 = GaloisMath.Factor(3);
+            
+            for (int i = 0; i < _sliceSize; i++)
+            {
+                var partParity = Data2[i];
+                var partReedSolomon = GaloisMath.Factor(2).Mul(Data2[i]);
+                
+                var xorPd = GaloisMath.Add(partParity, ParityData[i]);
+                var mid = GaloisMath.Add(f3.Mul(xorPd), partReedSolomon, ReedSolomon[i]);
+                
+                var r1 = mid.Mul(g);
+                Data1[i] = r1;
+                Data3[i] = GaloisMath.Add(r1, xorPd);
+            }
+        }
+        
+        private void RecoverFromData3()
+        {
+            if (Data3 == null || ReedSolomon == null || ParityData == null) throw new Exception("Recover double data (3) called with invalid state");
+            
+            Data1 = new byte[_sliceSize];
+            Data2 = new byte[_sliceSize];
+            byte inv = 1;
+            var g = inv.Div(GaloisMath.Add(GaloisMath.Factor(1), GaloisMath.Factor(2)));
+            var factor = GaloisMath.Factor(2);
+            
+            for (int i = 0; i < _sliceSize; i++)
+            {
+                var partParity = Data3[i];
+                var partReedSolomon = GaloisMath.Factor(3).Mul(Data3[i]);
+                
+                var xorPd = GaloisMath.Add(partParity, ParityData[i]);
+                var mid = GaloisMath.Add(factor.Mul(xorPd), partReedSolomon, ReedSolomon[i]);
+                
+                var r1 = mid.Mul(g);
+                Data1[i] = r1;
+                Data2[i] = GaloisMath.Add(r1, xorPd);
+            }
         }
     }
 }
