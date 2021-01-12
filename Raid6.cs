@@ -41,8 +41,8 @@ namespace RaidRecoverDemo
             }
             
             var lostParity = ParityData == null;
-            var lostCodes = ReedSolomon == null;
-            var lostRecovery = lostParity && lostCodes;
+            var lostReedSolomon = ReedSolomon == null;
+            var lostRecovery = lostParity && lostReedSolomon;
             var lostData = 0;
             if (Data1 == null) lostData++;
             if (Data2 == null) lostData++;
@@ -51,7 +51,7 @@ namespace RaidRecoverDemo
             // Reject impossible cases
             if (lostData > 2) throw new Exception("Too much data lost. Recovery not possible");
             if (lostData > 0 && lostRecovery) throw new Exception("Data and recovery codes lost. Recovery not possible");
-            if (lostData > 1 && (lostParity || lostCodes)) throw new Exception("Too much data and recovery info lost. Recovery not possible");
+            if (lostData > 1 && (lostParity || lostReedSolomon)) throw new Exception("Too much data and recovery info lost. Recovery not possible");
             
             // Possible cases left:
             // 1) 2 data, PD
@@ -60,17 +60,85 @@ namespace RaidRecoverDemo
 
             if (lostData == 1 && !lostParity)
             {
-                RecoverDataFromParity();
-                
-                ParityData ??= Raid6Calculator.CalculatePd(Data1!, Data2!, Data3!);
+                RecoverSingleLostDataFromParity();
                 ReedSolomon ??= Raid6Calculator.CalculateRs(Data1!, Data2!, Data3!);
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
+            
+            if (lostData == 1 && !lostReedSolomon)
+            {
+                RecoverSingleLostDataFromReedSolomon();
+                ParityData ??= Raid6Calculator.CalculatePd(Data1!, Data2!, Data3!);
+                return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
+            }
+            
+            if (lostData == 2)
+            {
+                RecoverDoubleLostData();
+                return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
+            }
+            
 
             throw new NotImplementedException("This recovery not yet implemented");
         }
 
-        private void RecoverDataFromParity()
+
+        private void RecoverDoubleLostData()
+        {
+            throw new NotImplementedException();
+        }
+        
+        private void RecoverSingleLostDataFromReedSolomon()
+        {
+            var recovered = new byte[_sliceSize];
+            var rs = ReedSolomon;
+
+            byte f1, f2, fDead, inv = 1;
+            byte[] good1, good2;
+            if (Data1 == null)
+            {
+                fDead = GaloisMath.Factor(1);
+                f1 = GaloisMath.Factor(2);
+                f2 = GaloisMath.Factor(3);
+                good1 = Data2!;
+                good2 = Data3!;
+            }
+            else if (Data2 == null)
+            {
+                fDead = GaloisMath.Factor(2);
+                f1 = GaloisMath.Factor(1);
+                f2 = GaloisMath.Factor(3);
+                good1 = Data1!;
+                good2 = Data3!;
+            }
+            else if (Data3 == null)
+            {
+                fDead = GaloisMath.Factor(3);
+                f1 = GaloisMath.Factor(1);
+                f2 = GaloisMath.Factor(2);
+                good1 = Data1!;
+                good2 = Data2!;
+            }
+            else throw new Exception("Invalid state");
+            
+            if (rs == null || good1 == null || good2 == null) throw new Exception("Recover data from parity called with invalid state");
+            for (var i = 0; i < _sliceSize; i++)
+            {
+                var partial = GaloisMath.Add(
+                    f1.Mul(good1[i]),
+                    rs[i], // instead of our dead drive
+                    f2.Mul(good2[i])
+                    );
+
+                recovered[i] = inv.Div(fDead).Mul(partial);
+            }
+            
+            Data1 ??= recovered;
+            Data2 ??= recovered;
+            Data3 ??= recovered;
+        }
+
+        private void RecoverSingleLostDataFromParity()
         {
             var recovered = new byte[_sliceSize];
             var parity = ParityData;

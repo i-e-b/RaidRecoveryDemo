@@ -65,7 +65,7 @@ namespace RaidRecoverDemo
                 rs[i] = 
                     GaloisMath.Add(
                         f1.Mul(slice1[i]),
-                        f2.Mul(slice3[i]),
+                        f2.Mul(slice2[i]),
                         f3.Mul(slice3[i])
                     );
             }

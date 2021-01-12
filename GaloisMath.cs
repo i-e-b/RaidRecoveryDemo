@@ -43,9 +43,13 @@ namespace RaidRecoverDemo
             _gfLog[1] = 0;
         }
 
-        public static byte Add(params byte [] a)
+        public static byte Add(byte a, byte b)
         {
-            return a.Aggregate((byte)0, (current, t) => (byte) (current ^ t));
+            return (byte) (a ^ b);
+        }
+        public static byte Add(byte a, byte b, byte c)
+        {
+            return (byte) (a ^ b ^ c);
         }
 
         public static byte Mul(this byte a, byte b)
@@ -54,11 +58,11 @@ namespace RaidRecoverDemo
             return GfiLog[(GfLog[a] + GfLog[b]) % 255];
         }
 
-        private static byte Sub(this byte a, byte b)
+        public static byte Sub(this byte a, byte b)
         {
             return (byte)(a > b 
                     ? a - b
-                    : 255 - (0 - (a - b))
+                    : 255 + (a - b)
                 );
         }
 
