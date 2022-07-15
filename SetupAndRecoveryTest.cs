@@ -1,5 +1,6 @@
 ﻿using System;
 using NUnit.Framework;
+#pragma warning disable CS8602
 
 namespace RaidRecoverDemo
 {
@@ -241,6 +242,55 @@ namespace RaidRecoverDemo
             Assert.That(result, Is.EqualTo(originalData).AsCollection!, "Recover did not reset data");
         }
 
+        /// <summary>
+        /// The RAID6 scheme is primarily designed to handle total loss of one of
+        /// the partitions. It can recover data corruption, but only at low density.
+        ///
+        /// In the case that recovery is not possible, error detection rates are very good.
+        /// </summary>
+        [Test(Description = "These have an increasing statistical chance of failing. Over 100 fails most times")]
+        [TestCase(1)]  // 0.03% - should never fail
+        [TestCase(10)] // 0.3%  - should fail very rarely
+        [TestCase(25)] // 0.8%  - should fail rarely
+        [TestCase(50)] // 1.6%  - fails frequently
+        public void recover_scattered_damage(int rounds)
+        {
+            var rnd = new Random();
+            var originalData = GetRandomBytes();
+            var raidSet = Raid6.CalculateRaidSet(originalData);
+
+            for (int i = 0; i < rounds; i++)
+            {
+                var set = rnd.Next(0,5);
+                var pos = rnd.Next(0, raidSet.Data1.Length);
+                var value = (byte)rnd.Next();
+                
+                switch (set)
+                {
+                    case 0:
+                        raidSet.Data1[pos] = value;
+                        break;
+                    case 1:
+                        raidSet.Data2[pos] = value;
+                        break;
+                    case 2:
+                        raidSet.Data3[pos] = value;
+                        break;
+                    case 3:
+                        raidSet.ParityData[pos] = value;
+                        break;
+                    case 4:
+                        raidSet.ReedSolomon[pos] = value;
+                        break;
+                }
+            }
+            
+            var recoveredData = raidSet.Recover();
+            Assert.That(recoveredData, Is.EqualTo(originalData).AsCollection!, "Recovered data is not the same as before");
+            // Check data is back:
+            var result = Raid6Calculator.UnsliceData(raidSet.Data1!, raidSet.Data2!, raidSet.Data3!);
+            Assert.That(result, Is.EqualTo(originalData).AsCollection!, "Recover did not reset data");
+        }
 
         private static byte[] GetRandomBytes()
         {

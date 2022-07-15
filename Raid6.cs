@@ -31,12 +31,11 @@ namespace RaidRecoverDemo
 
         public byte[] Recover()
         {
-            if (Data1 != null && Data2 != null && Data3 != null)
+            if (Data1 != null && Data2 != null && Data3 != null) // all data is in place
             {
-                // TODO: check the data is CORRECT against the PD, use RS to recover
-                
                 ParityData ??= Raid6Calculator.CalculatePd(Data1, Data2, Data3);
                 ReedSolomon ??= Raid6Calculator.CalculateRs(Data1, Data2, Data3);
+                ErrorCorrectRound();
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
             
@@ -62,6 +61,7 @@ namespace RaidRecoverDemo
             {
                 RecoverSingleLostDataFromParity();
                 ReedSolomon ??= Raid6Calculator.CalculateRs(Data1!, Data2!, Data3!);
+                ErrorCorrectRound();
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
             
@@ -69,16 +69,139 @@ namespace RaidRecoverDemo
             {
                 RecoverSingleLostDataFromReedSolomon();
                 ParityData ??= Raid6Calculator.CalculatePd(Data1!, Data2!, Data3!);
+                ErrorCorrectRound();
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
             
             if (lostData == 2)
             {
                 RecoverDoubleLostData();
+                ErrorCorrectRound();
                 return Raid6Calculator.UnsliceData(Data1!, Data2!, Data3!);
             }
             
             throw new NotImplementedException("Unexpected state");
+        }
+
+        /// <summary>
+        /// Either all data is present, or it has been recovered.
+        /// Now we check the data against PD & RS. If anything is wrong,
+        /// we try to correct the data more than one way.
+        /// If the ways agree, we've recovered everything the best we can.
+        /// If not, then we know that the data is corrupt beyond recovery
+        /// </summary>
+        private void ErrorCorrectRound()
+        {
+            if (ParityData == null || Data1 == null || Data2 == null ||
+                Data3 == null || ReedSolomon == null) throw new Exception("Error correct round called with invalid state");
+            
+            for (var i = 0; i < _sliceSize; i++)
+            {
+                var d1 = Data1[i];
+                var d2 = Data2[i];
+                var d3 = Data3[i];
+                
+                // what the data thinks parity and reed solomon should be:
+                var pd = Raid6Calculator.BytePd(d1, d2, d3);
+                var rs = Raid6Calculator.ByteRs(d1, d2, d3);
+                
+                if (pd == ParityData[i] && rs == ReedSolomon[i]) continue; // this byte is good
+                
+                // If here, one of the 5 bytes are bad.
+                // Try recovering each in turn from the others.
+                // Agreement wins, otherwise throw.
+                
+                // Case 1: Data and Parity agree -- RS is wrong
+                if (pd == ParityData[i])
+                {
+                    ReedSolomon[i] = rs;
+                    continue;
+                }
+                
+                // Case 2: Data and RS agree -- parity is wrong
+                if (rs == ReedSolomon[i])
+                {
+                    ParityData[i] = pd;
+                    continue;
+                }
+
+                // Case 3: Data does not agree with RS or PD
+                // what the parity thinks the data should be:
+                var parity1 = (byte)(Data3[i] ^ Data2[i] ^ ParityData[i]);
+                var parity2 = (byte)(Data1[i] ^ Data3[i] ^ ParityData[i]);
+                var parity3 = (byte)(Data1[i] ^ Data2[i] ^ ParityData[i]);
+
+                // what the ecc thinks the data should be:
+                var reedSolomon1 = RecoverByteFromRsAndData23(d2, d3, ReedSolomon[i]);
+                var reedSolomon2 = RecoverByteFromRsAndData13(d1, d3, ReedSolomon[i]);
+                var reedSolomon3 = RecoverByteFromRsAndData12(d1, d2, ReedSolomon[i]);
+                
+                // now check each one. Any 2 votes is good.
+                if (parity1 == reedSolomon1) Data1[i] = parity1;
+                if (parity2 == reedSolomon2) Data2[i] = parity2;
+                if (parity3 == reedSolomon3) Data3[i] = parity3;
+                
+                // Check the sums again:
+                d1 = Data1[i];
+                d2 = Data2[i];
+                d3 = Data3[i];
+                
+                pd = Raid6Calculator.BytePd(d1, d2, d3);
+                rs = Raid6Calculator.ByteRs(d1, d2, d3);
+                
+                if (pd == ParityData[i] && rs == ReedSolomon[i]) continue; // this group has been repaired successfully
+
+                throw new Exception("Unrecoverable data at index "+i);
+            }
+        }
+
+        private byte RecoverByteFromRsAndData12(byte data1, byte data2, byte rs)
+        {
+            var fDead = GaloisMath.Factor(3);
+            var f1 = GaloisMath.Factor(1);
+            var f2 = GaloisMath.Factor(2);
+            byte inv = 1;
+            
+            var partial = GaloisMath.Add(
+                f1.Mul(data1),
+                rs, // instead of our dead drive
+                f2.Mul(data2)
+            );
+
+            return inv.Div(fDead).Mul(partial);
+        }
+
+
+        private byte RecoverByteFromRsAndData13(byte data1, byte data3, byte rs)
+        {
+            var fDead = GaloisMath.Factor(2);
+            var f1 = GaloisMath.Factor(1);
+            var f2 = GaloisMath.Factor(3);
+            byte inv = 1;
+            
+            var partial = GaloisMath.Add(
+                f1.Mul(data1),
+                rs, // instead of our dead drive
+                f2.Mul(data3)
+            );
+
+            return inv.Div(fDead).Mul(partial);
+        }
+        
+        private byte RecoverByteFromRsAndData23(byte data2, byte data3, byte rs)
+        {
+            var fDead = GaloisMath.Factor(1);
+            var f1 = GaloisMath.Factor(2);
+            var f2 = GaloisMath.Factor(3);
+            byte inv = 1;
+            
+            var partial = GaloisMath.Add(
+                f1.Mul(data2),
+                rs, // instead of our dead drive
+                f2.Mul(data3)
+            );
+
+            return inv.Div(fDead).Mul(partial);
         }
 
         private void RecoverSingleLostDataFromParity()

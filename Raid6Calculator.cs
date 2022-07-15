@@ -39,6 +39,11 @@ namespace RaidRecoverDemo
             return dst;
         }
 
+        public static byte BytePd(byte slice1, byte slice2, byte slice3)
+        {
+            return (byte) (slice1 ^ slice2 ^ slice3);
+        }
+
         public static byte[] CalculatePd(byte[] slice1, byte[] slice2, byte[] slice3)
         {
             if (slice1 == null || slice2 == null || slice3 == null) throw new Exception("All slices must be non-null");
@@ -49,6 +54,19 @@ namespace RaidRecoverDemo
                 pd[i] = (byte) (slice1[i] ^ slice2[i] ^ slice3[i]);
             }
             return pd;
+        }
+
+        public static byte ByteRs(byte slice1, byte slice2, byte slice3)
+        {
+            var f1 = GaloisMath.Factor(1);
+            var f2 = GaloisMath.Factor(2);
+            var f3 = GaloisMath.Factor(3);
+
+            return GaloisMath.Add(
+                    f1.Mul(slice1),
+                    f2.Mul(slice2),
+                    f3.Mul(slice3)
+                );
         }
 
         public static byte[] CalculateRs(byte[] slice1, byte[] slice2, byte[] slice3)
